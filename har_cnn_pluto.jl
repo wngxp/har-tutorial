@@ -18,6 +18,7 @@ begin
     using Flux
     using Random
     using Statistics
+    using StatsPlots
 end
 
 # ╔═╡ 3b0b8b8e-7f52-44cb-ad25-511e82d6e08f
@@ -190,7 +191,154 @@ begin
 end
 
 # ╔═╡ 85e43805-1289-4f17-9b77-8db46cfc40f0
-run_experiment(repeats=10, epochs=10, batch_size=32)
+
+
+# ╔═╡ 6a6b43f6-2e8a-4a8b-9d7a-b0c6c9c0a6c1
+begin
+    # remove 50% overlap (keep last half of each window), then flatten across time & windows
+    function long_format(X::Array{Float32,3})
+        N, T, C = size(X)
+        cut = Int(T ÷ 2)
+        X2 = X[:, (T - cut + 1):T, :]          # (N, cut, C)
+        return reshape(X2, N * cut, C)         # (N*cut, C)
+    end
+
+    # flatten full windows (all timesteps) into (N*T, C)
+    function flat_format(X::Array{Float32,3})
+        N, T, C = size(X)
+        return reshape(X, N * T, C)
+    end
+end
+
+# ╔═╡ 9c3e2b0c-9a2b-4a67-8f8c-2d6d8a9a8d5c
+begin
+    function plot_variable_distributions(trainX::Array{Float32,3}; bins=100)
+        X = long_format(trainX)  # (N*cut, 9)
+
+        names = [
+            "total_acc_x","total_acc_y","total_acc_z",
+            "body_acc_x","body_acc_y","body_acc_z",
+            "body_gyro_x","body_gyro_y","body_gyro_z"
+        ]
+
+        p = plot(layout=(size(X,2), 1), legend=false)
+        for i in 1:size(X,2)
+            histogram!(p[i], X[:, i]; bins=bins, xlims=(-1, 1), title=names[i])
+        end
+        p
+    end
+end
+
+# ╔═╡ 2d8c6f83-1ef0-41fb-9b55-7d4d8d9a2b11
+begin
+    function scale_data(trainX::Array{Float32,3}, testX::Array{Float32,3}, standardize::Bool)
+        if !standardize
+            return trainX, testX
+        end
+
+        # fit scaler on de-overlapped long training data
+        longX = long_format(trainX)    # (N*cut, C)
+        μ = vec(mean(longX, dims=1))   # (C,)
+        σ = vec(std(longX, dims=1)) .+ 1f-6
+
+        # apply to flattened full train/test, then reshape back
+        flatTrain = flat_format(trainX)
+        flatTest  = flat_format(testX)
+
+        flatTrain = (flatTrain .- μ') ./ σ'
+        flatTest  = (flatTest  .- μ') ./ σ'
+
+        Ntr, Ttr, Ctr = size(trainX)
+        Nte, Tte, Cte = size(testX)
+
+        trainX2 = reshape(flatTrain, Ntr, Ttr, Ctr)
+        testX2  = reshape(flatTest,  Nte, Tte, Cte)
+
+        return trainX2, testX2
+    end
+end
+
+# ╔═╡ 6e1f3c3e-3f2e-4f1c-9e6a-3e9b1b8b6c4a
+begin
+    function evaluate_model_param(trainX, trainY, testX, testY, standardize::Bool; epochs=10, batch_size=32, seed=0)
+        Random.seed!(seed)
+
+        # optional standardization
+        trainX2, testX2 = scale_data(trainX, testX, standardize)
+
+        Xtr = to_flux(trainX2)
+        Xte = to_flux(testX2)
+
+        Ytr = permutedims(trainY, (2, 1))
+        Yte = permutedims(testY,  (2, 1))
+
+        _, n_timesteps, n_features = size(trainX2)
+        n_outputs = size(trainY, 2)
+
+        model = build_model(n_timesteps, n_features, n_outputs)
+
+        opt = Flux.Adam()
+        opt_state = Flux.setup(opt, model)
+
+        accuracy(X, Y) = mean(Flux.onecold(model(X)) .== Flux.onecold(Y))
+
+        for _ in 1:epochs
+            idx = Random.randperm(size(Xtr, 3))
+            for start in 1:batch_size:length(idx)
+                batch_idx = idx[start:min(start + batch_size - 1, end)]
+                x = Xtr[:, :, batch_idx]
+                y = Ytr[:, batch_idx]
+
+                gs = Flux.gradient(model) do m
+                    Flux.crossentropy(m(x), y)
+                end
+                Flux.update!(opt_state, model, gs[1])
+            end
+        end
+
+        return accuracy(Xte, Yte)
+    end
+end
+
+# ╔═╡ 0c7f7c1a-2b9b-4c9b-9e8d-1d2e3f4a5b6c
+begin
+    function summarize_results_params(all_scores, params; outfile="exp_cnn_standardize.png")
+        # print mean/std per param
+        for (i, p) in enumerate(params)
+            m, s = mean(all_scores[i]), std(all_scores[i])
+            println("Param=$(p): $(round(m, digits=3))% (+/-$(round(s, digits=3)))")
+        end
+
+        # boxplot
+        labels = string.(params)
+        bp = StatsPlots.boxplot(labels, all_scores; legend=false)
+        savefig(bp, outfile)
+        return bp
+    end
+end
+
+# ╔═╡ 4b1a2c3d-5e6f-4a7b-8c9d-0e1f2a3b4c5d
+begin
+    function run_experiment_params(params; repeats=10, epochs=10, batch_size=32)
+        trainX, trainY, testX, testY = load_dataset(DATA_DIR)
+
+        all_scores = Vector{Vector{Float64}}()
+        for p in params
+            scores = Float64[]
+            for r in 1:repeats
+                score = evaluate_model_param(trainX, trainY, testX, testY, p; epochs=epochs, batch_size=batch_size, seed=r) * 100
+                println(">p=$(p) #$(r): $(round(score, digits=3))")
+                push!(scores, score)
+            end
+            push!(all_scores, scores)
+        end
+
+        summarize_results_params(all_scores, params)
+    end
+end
+
+# ╔═╡ a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5e
+run_experiment_params([false, true]; repeats=10, epochs=10, batch_size=32)
 
 # ╔═╡ Cell order:
 # ╠═818526bf-69f6-4a89-976f-331c853e3f31
@@ -205,3 +353,10 @@ run_experiment(repeats=10, epochs=10, batch_size=32)
 # ╠═f337bdf6-301f-4346-9881-e373823156b7
 # ╠═193f08e0-b8e9-4387-a24f-263692dc79b5
 # ╠═85e43805-1289-4f17-9b77-8db46cfc40f0
+# ╠═6a6b43f6-2e8a-4a8b-9d7a-b0c6c9c0a6c1
+# ╠═9c3e2b0c-9a2b-4a67-8f8c-2d6d8a9a8d5c
+# ╠═2d8c6f83-1ef0-41fb-9b55-7d4d8d9a2b11
+# ╠═6e1f3c3e-3f2e-4f1c-9e6a-3e9b1b8b6c4a
+# ╠═0c7f7c1a-2b9b-4c9b-9e8d-1d2e3f4a5b6c
+# ╠═4b1a2c3d-5e6f-4a7b-8c9d-0e1f2a3b4c5d
+# ╠═a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5e
