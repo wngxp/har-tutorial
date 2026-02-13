@@ -342,7 +342,7 @@ begin
 
         # boxplot
         labels = string.(params)
-        bp = StatsPlots.boxplot(labels, all_scores; legend=false)
+        bp = StatsPlots.boxplot(all_scores; labels=labels, legend=false)
         savefig(bp, outfile)
         return bp
     end
@@ -369,7 +369,7 @@ begin
 end
 
 # ╔═╡ a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5e
-run_experiment_params([false, true]; repeats=10, epochs=10, batch_size=32)
+results = run_experiment_params([false, true]; repeats=10, epochs=10)
 
 # ╔═╡ Cell order:
 # ╠═818526bf-69f6-4a89-976f-331c853e3f31
