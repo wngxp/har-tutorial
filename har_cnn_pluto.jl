@@ -21,6 +21,7 @@ begin
     using StatsPlots
 
 	using CUDA
+    using cuDNN
 end
 
 # ╔═╡ f641d569-b46c-4c48-9215-7ae6c696456b
@@ -132,29 +133,36 @@ end
 
 # ╔═╡ 6eea02e7-29a3-4dea-848d-ff47bc725e9b
 begin
-    function evaluate_model(trainX, trainY, testX, testY; epochs=10, batch_size=32, seed=0)
+    function evaluate_model(trainX, trainY, testX, testY; epochs=10, batch_size=32, seed=0, use_gpu::Bool=true)
         Random.seed!(seed)
 
-        Xtr = to_flux(trainX)
-        Xte = to_flux(testX)
+        # Decide device
+        use_gpu = use_gpu && CUDA.functional()
+        dev(x) = use_gpu ? gpu(x) : x
 
-        Ytr = permutedims(trainY, (2, 1))
-        Yte = permutedims(testY,  (2, 1))
+        Xtr = dev(to_flux(trainX))
+        Xte = dev(to_flux(testX))
+
+        Ytr = dev(permutedims(trainY, (2, 1)))
+        Yte = dev(permutedims(testY,  (2, 1)))
 
         _, n_timesteps, n_features = size(trainX)
         n_outputs = size(trainY, 2)
 
         model = build_model(n_timesteps, n_features, n_outputs)
+        model = use_gpu ? gpu(model) : model
 
         opt = Flux.Adam()
         opt_state = Flux.setup(opt, model)
 
-        accuracy(X, Y) = mean(Flux.onecold(model(X)) .== Flux.onecold(Y))
+        # Compute accuracy on CPU for simplicity (works regardless of device)
+        accuracy(X, Y) = mean(Flux.onecold(Array(model(X))) .== Flux.onecold(Array(Y)))
 
         for _ in 1:epochs
             idx = Random.randperm(size(Xtr, 3))
             for start in 1:batch_size:length(idx)
                 batch_idx = idx[start:min(start + batch_size - 1, end)]
+
                 x = Xtr[:, :, batch_idx]
                 y = Ytr[:, batch_idx]
 
@@ -165,7 +173,14 @@ begin
             end
         end
 
-        return accuracy(Xte, Yte)
+        # quick device sanity print (Pluto will show last expression)
+        (
+            used_gpu = use_gpu,
+            x_device = typeof(Xtr),
+            y_device = typeof(Ytr),
+            model_device = typeof(model),
+            test_acc = accuracy(Xte, Yte),
+        )
     end
 end
 
@@ -186,7 +201,7 @@ begin
 
         scores = Float64[]
         for r in 1:repeats
-            score = evaluate_model(trainX, trainY, testX, testY; epochs=epochs, batch_size=batch_size, seed=r) * 100
+            score = evaluate_model(trainX, trainY, testX, testY; epochs=epochs, batch_size=batch_size, seed=r, use_gpu=true).test_acc * 100
             println(">#$(r): $(round(score, digits=3))")
             push!(scores, score)
         end
@@ -265,32 +280,38 @@ end
 
 # ╔═╡ 6e1f3c3e-3f2e-4f1c-9e6a-3e9b1b8b6c4a
 begin
-    function evaluate_model_param(trainX, trainY, testX, testY, standardize::Bool; epochs=10, batch_size=32, seed=0)
+    function evaluate_model_param(trainX, trainY, testX, testY, standardize::Bool; epochs=10, batch_size=32, seed=0, use_gpu::Bool=true)
         Random.seed!(seed)
 
         # optional standardization
         trainX2, testX2 = scale_data(trainX, testX, standardize)
 
-        Xtr = to_flux(trainX2)
-        Xte = to_flux(testX2)
+        # Decide device
+        use_gpu = use_gpu && CUDA.functional()
+        dev(x) = use_gpu ? gpu(x) : x
 
-        Ytr = permutedims(trainY, (2, 1))
-        Yte = permutedims(testY,  (2, 1))
+        Xtr = dev(to_flux(trainX2))
+        Xte = dev(to_flux(testX2))
+
+        Ytr = dev(permutedims(trainY, (2, 1)))
+        Yte = dev(permutedims(testY,  (2, 1)))
 
         _, n_timesteps, n_features = size(trainX2)
         n_outputs = size(trainY, 2)
 
         model = build_model(n_timesteps, n_features, n_outputs)
+        model = use_gpu ? gpu(model) : model
 
         opt = Flux.Adam()
         opt_state = Flux.setup(opt, model)
 
-        accuracy(X, Y) = mean(Flux.onecold(model(X)) .== Flux.onecold(Y))
+        accuracy(X, Y) = mean(Flux.onecold(Array(model(X))) .== Flux.onecold(Array(Y)))
 
         for _ in 1:epochs
             idx = Random.randperm(size(Xtr, 3))
             for start in 1:batch_size:length(idx)
                 batch_idx = idx[start:min(start + batch_size - 1, end)]
+
                 x = Xtr[:, :, batch_idx]
                 y = Ytr[:, batch_idx]
 
@@ -331,7 +352,7 @@ begin
         for p in params
             scores = Float64[]
             for r in 1:repeats
-                score = evaluate_model_param(trainX, trainY, testX, testY, p; epochs=epochs, batch_size=batch_size, seed=r) * 100
+                score = evaluate_model_param(trainX, trainY, testX, testY, p; epochs=epochs, batch_size=batch_size, seed=r, use_gpu=true) * 100
                 println(">p=$(p) #$(r): $(round(score, digits=3))")
                 push!(scores, score)
             end
