@@ -166,14 +166,15 @@ begin
             for start in 1:batch_size:length(idx)
                 batch_idx = idx[start:min(start + batch_size - 1, end)]
 
-                x = Xtr[:, :, batch_idx]
-                y = Ytr[:, batch_idx]
+                @views x = Xtr[:, :, batch_idx]
+                @views y = Ytr[:, batch_idx]
 
                 gs = Flux.gradient(model) do m
                     Flux.crossentropy(m(x), y)
                 end
                 Flux.update!(opt_state, model, gs[1])
             end
+            use_gpu && CUDA.synchronize()
         end
 
         # quick device sanity print (Pluto will show last expression)
@@ -199,7 +200,7 @@ end
 
 # ╔═╡ 193f08e0-b8e9-4387-a24f-263692dc79b5
 begin
-    function run_experiment(; repeats=10, epochs=10, batch_size=32)
+    function run_experiment(; repeats=10, epochs=10, batch_size=512)
         trainX, trainY, testX, testY = load_dataset(DATA_DIR)
 
         scores = Float64[]
@@ -315,14 +316,15 @@ begin
             for start in 1:batch_size:length(idx)
                 batch_idx = idx[start:min(start + batch_size - 1, end)]
 
-                x = Xtr[:, :, batch_idx]
-                y = Ytr[:, batch_idx]
+                @views x = Xtr[:, :, batch_idx]
+                @views y = Ytr[:, batch_idx]
 
                 gs = Flux.gradient(model) do m
                     Flux.crossentropy(m(x), y)
                 end
                 Flux.update!(opt_state, model, gs[1])
             end
+            use_gpu && CUDA.synchronize()
         end
 
         return accuracy(Xte, Yte)
@@ -348,7 +350,7 @@ end
 
 # ╔═╡ 4b1a2c3d-5e6f-4a7b-8c9d-0e1f2a3b4c5d
 begin
-    function run_experiment_params(params; repeats=10, epochs=10, batch_size=32)
+    function run_experiment_params(params; repeats=10, epochs=10, batch_size=512)
         trainX, trainY, testX, testY = load_dataset(DATA_DIR)
 
         all_scores = Vector{Vector{Float64}}()
