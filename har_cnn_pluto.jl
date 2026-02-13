@@ -19,7 +19,12 @@ begin
     using Random
     using Statistics
     using StatsPlots
+
+	using CUDA
 end
+
+# ╔═╡ f641d569-b46c-4c48-9215-7ae6c696456b
+
 
 # ╔═╡ 3b0b8b8e-7f52-44cb-ad25-511e82d6e08f
 DATA_DIR = "HARDataset"
@@ -343,6 +348,7 @@ run_experiment_params([false, true]; repeats=10, epochs=10, batch_size=32)
 # ╔═╡ Cell order:
 # ╠═818526bf-69f6-4a89-976f-331c853e3f31
 # ╠═2a907f20-9239-4fed-b7f1-985c7ed92ad6
+# ╠═f641d569-b46c-4c48-9215-7ae6c696456b
 # ╠═3b0b8b8e-7f52-44cb-ad25-511e82d6e08f
 # ╠═45c73ab0-1c88-4d78-ab4e-82b5011ccd55
 # ╠═6408e488-785a-4bc2-a9fb-118ec47fe479
